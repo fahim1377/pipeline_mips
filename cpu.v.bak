@@ -1,0 +1,180 @@
+module CPU(input clk);
+wire [31:0] instruction;
+wire [31:0] readData1;
+wire [31:0] readData2;
+wire [31:0] aluResult;
+wire [31:0] RdataDM;
+wire [31:0] adder1Result;
+wire [31:0] adder2Result;
+wire dntCare;
+wire lt,gt,bcond;
+wire [1:0]RegDst,MemReg;
+wire Jump,Branch,MemRead,AluSrc,RegWrite,MemWrite;
+wire [3:0] Aluop;
+wire re1,re2,we1,we2,we3;
+wire [4:0]ws1,ws2,ws3;
+
+
+
+wire pcEn;
+wire F2DirEn;
+wire mux2sel;
+wire mux1Sel;
+wire [1:0]mux3sel;
+wire [1:0]mux4sel;
+wire [31:0]outPC;
+wire [31:0]IF2IDinstructionout;
+wire [1:0]mux0sel;
+wire [31:0] jumpValue;
+
+REG PC(pcEn,clk,mux0sel[1]? (  mux0sel[0]?adder2Result:jumpValue  ): (  mux0sel[0]?readData1:adder1Result  ) ,outPC);
+
+                      
+
+
+REG IF2IDinstruction(F2DirEn,clk,mux1Sel?32'd32:instruction,IF2IDinstructionout);
+
+
+reg [31:0] ID2EXa;
+reg [31:0] ID2EXb;
+reg [31:0] EX2MEMb;
+reg [13:0] controlSignals;                     
+reg [31:0] ID2EXinstruction;
+reg [31:0] EX2MEMir;
+reg [31:0] MEM2WBinstruction;
+reg [31:0] NpcF2D;
+reg [31:0] NpcD2EX;
+reg [31:0] NpcEX2M;
+reg [13:0]MEM2WBcontrolSignals;
+reg [13:0]ID2EXcontrolSignals;
+reg [13:0]EX2MEMcontrolSignals;
+reg [31:0]EX2MEMaluResult;
+reg [31:0]MEM2WBoutMux;
+
+assign jumpValue = {  (IF2IDinstructionout[25:0]<<<2) , NpcF2D[31:28]  }  ;
+
+initial begin
+  #20
+                        ID2EXcontrolSignals[0] = RegDst[0];                 
+                        ID2EXcontrolSignals[1] = Jump;
+                        ID2EXcontrolSignals[2] = Branch;
+                        ID2EXcontrolSignals[3] = MemRead;
+                        ID2EXcontrolSignals[4] = MemReg[0];
+                        ID2EXcontrolSignals[5] = AluSrc;
+                        ID2EXcontrolSignals[6] = RegWrite;
+                        ID2EXcontrolSignals[7] = MemWrite;
+                        ID2EXcontrolSignals[8] = Aluop[0];
+                        ID2EXcontrolSignals[9] = Aluop[1];
+                        ID2EXcontrolSignals[10] = Aluop[2];
+                        ID2EXcontrolSignals[11] = Aluop[3];
+                        ID2EXcontrolSignals[12] = RegDst[1];
+                        ID2EXcontrolSignals[13] = MemReg[1];  
+                        IF2IDinstruction(F2DirEn,clk,32'd32,IF2IDinstructionout)
+                                    
+end
+///////////////////////
+IMemBank instrMem(1'b1,outPC,instruction);
+ALU adder1(outPC,32'd4,4'b0000,adder1Result,dntCare,dntCare,dntCare,dntCare);
+///////////////////////
+
+//                        nop =31'd31
+//                        controlSignals[0] = RegDst
+//                        controlSignals[1] = Jump
+//                        controlSignals[2] = Branch
+//                        controlSignals[3] = MemRead
+//                        controlSignals[4] = MemReg
+//                        controlSignals[5] = AluSrc
+//                        controlSignals[6] = RegWrite
+//                        controlSignals[7] = MemWrite
+//                        controlSignals[8] = Aluop[0]
+//                        controlSignals[9] = Aluop[1]
+//                        controlSignals[10] = Aluop[2]
+//                        controlSignals[11] = Aluop[3]
+//                        controlSignals[12] = RegDst[1]
+//                        controlSignals[13] = MemReg[1]
+
+control control1(IF2IDinstructionout[31:26],IF2IDinstructionout[5:0],RegDst,Jump,Branch,MemRead,MemReg,AluSrc,RegWrite,MemWrite,Aluop);
+RegFile registerFile(clk,IF2IDinstructionout[25:21],IF2IDinstructionout[20:16], MEM2WBcontrolSignals[12]?(5'd31):(MEM2WBcontrolSignals[0]?MEM2WBinstruction[15:11]:MEM2WBinstruction[20:16]),
+                    MEM2WBoutMux ,MEM2WBcontrolSignals[6],readData1,readData2);
+
+CRE1 cre1(IF2IDinstructionout,re1);
+CRE1 cre2(IF2IDinstructionout,re2);
+CDEST cdest1(ID2EXinstruction,ws1,we1);
+CDEST cdest2(ID2EXinstruction,ws2,we2);
+
+HDU hdu(IF2IDinstructionout,ID2EXinstruction,ws1,ws2,IF2IDinstructionout[25:21],IF2IDinstructionout[20:16],we1,we2,re1,re2,bcond,pcEn,F2DirEn,mux2sel,mux1sel,mux0sel);
+
+FU fu(IF2IDinstructionout,ID2EXinstruction,EX2MEMir,M2WBir,ws1,ws2,ws3,IF2IDinstructionout[25:21],IF2IDinstructionout[20:16],we1,we2,we3,re1,re2,mux3sel,mux4sel);
+////////////////////////////
+ALU adder2(NpcD2EX,32'(signed'(ID2EXinstruction[15:0]))<<<2,4'b0000,adder2Result,dntCare,dntCare,dntCare,dntCare);
+ALU alu(ID2EXa,(ID2EXcontrolSignals[5]?32'(signed'(ID2EXinstruction[15:0])):ID2EXb),ID2EXcontrolSignals[11:8],aluResult,zero,lt,gtl,bcond);
+/////////////////////
+DMemBank DMem(EX2MEMcontrolSignals[3],EX2MEMcontrolSignals[7],EX2MEMaluResult,EX2MEMb,RdataDM);
+///////////////////////
+
+wire [31:0] outmux5;
+assign outmux5 = EX2MEMcontrolSignals[13]?( NpcEX2M ) : ( EX2MEMcontrolSignals[4]?(RdataDM) : (EX2MEMaluResult) ) ;
+
+always@(posedge clk)
+begin
+
+    //  Fetch
+      NpcF2D = adder1Result;
+    //
+
+    //Decode
+      NpcD2EX = NpcF2D;
+      ID2EXcontrolSignals = mux2sel?14'b00000000000000:controlSignals;
+      ID2EXa = mux3sel[1]? ( mux3sel[0]?(MEM2WBoutMux) : (outmux5) ) : ( mux3sel[0]?(aluResult) : (readData1) ) ;
+      ID2EXa = mux4sel[1]? ( mux4sel[0]?(MEM2WBoutMux) : (outmux5) ) : ( mux4sel[0]?(aluResult) : (readData2) ) ;
+      ID2EXinstruction = IF2IDinstructionout;
+                        ID2EXcontrolSignals[0] = RegDst[0];                 
+                        ID2EXcontrolSignals[1] = Jump;
+                        ID2EXcontrolSignals[2] = Branch;
+                        ID2EXcontrolSignals[3] = MemRead;
+                        ID2EXcontrolSignals[4] = MemReg[0];
+                        ID2EXcontrolSignals[5] = AluSrc;
+                        ID2EXcontrolSignals[6] = RegWrite;
+                        ID2EXcontrolSignals[7] = MemWrite;
+                        ID2EXcontrolSignals[8] = Aluop[0];
+                        ID2EXcontrolSignals[9] = Aluop[1];
+                        ID2EXcontrolSignals[10] = Aluop[2];
+                        ID2EXcontrolSignals[11] = Aluop[3];
+                        ID2EXcontrolSignals[12] = RegDst[1];
+                        ID2EXcontrolSignals[13] = MemReg[1];
+
+    //
+
+    //Execute
+      NpcEX2M = NpcD2EX;
+      EX2MEMcontrolSignals = ID2EXcontrolSignals;
+      EX2MEMaluResult = aluResult;
+      EX2MEMir = ID2EXinstruction;
+    //
+
+    // MEM
+      MEM2WBcontrolSignals = EX2MEMcontrolSignals;
+      MEM2WBoutMux = outmux5;
+      MEM2WBinstruction = EX2MEMir;
+
+
+    //
+
+end
+
+
+endmodule
+
+module CpuTB();
+
+reg clock = 1'b0;
+CPU cpu(clock);
+
+initial begin 
+
+forever begin
+#50 clock = ~clock;
+end
+end
+
+endmodule
